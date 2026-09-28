@@ -184,3 +184,48 @@ async def test_review_timestamp_is_sent_as_utc(client: httpx.AsyncClient) -> Non
         f"/movies/{movie['sk_movie_id']}/reviews", json={"nome": "A", "nota": 5, "comentario": "c"}
     )
     assert response.json()["created_at"].endswith("Z")
+
+
+async def add_reviews(client: httpx.AsyncClient, movie_id: str, *notas: float) -> None:
+    for nota in notas:
+        response = await client.post(
+            f"/movies/{movie_id}/reviews", json={"nome": "A", "nota": nota, "comentario": "c"}
+        )
+        assert response.status_code == 201
+
+
+async def test_sort_by_rating_and_min_reviews(client: httpx.AsyncClient) -> None:
+    low = await create_movie(client, titulo="Baixa")
+    high = await create_movie(client, titulo="Alta")
+    single = await create_movie(client, titulo="Uma só")
+    await create_movie(client, titulo="Sem notas")
+    await add_reviews(client, low["sk_movie_id"], 2, 4)
+    await add_reviews(client, high["sk_movie_id"], 9, 10)
+    await add_reviews(client, single["sk_movie_id"], 10)
+
+    ranked = (await client.get("/movies", params={"ordenar": "nota"})).json()
+    assert [m["titulo"] for m in ranked["items"]] == ["Uma só", "Alta", "Baixa", "Sem notas"]
+
+    filtered = (await client.get("/movies", params={"ordenar": "nota", "min_avaliacoes": 2})).json()
+    assert filtered["total"] == 2
+    assert [m["titulo"] for m in filtered["items"]] == ["Alta", "Baixa"]
+
+
+async def test_stats_and_reviews_feed(client: httpx.AsyncClient) -> None:
+    empty = (await client.get("/stats")).json()
+    assert empty == {"total_filmes": 0, "total_avaliacoes": 0, "nota_media_geral": None}
+
+    movie = await create_movie(client, titulo="Com avaliações", url_poster="https://x/p.jpg")
+    await create_movie(client, titulo="Outro")
+    await add_reviews(client, movie["sk_movie_id"], 6, 9)
+
+    stats = (await client.get("/stats")).json()
+    assert stats == {"total_filmes": 2, "total_avaliacoes": 2, "nota_media_geral": 7.5}
+
+    feed = (await client.get("/reviews", params={"page_size": 1})).json()
+    assert feed["total"] == 2
+    assert feed["pages"] == 2
+    item = feed["items"][0]
+    assert item["titulo_filme"] == "Com avaliações"
+    assert item["url_poster"] == "https://x/p.jpg"
+    assert item["sk_movie_id"] == movie["sk_movie_id"]

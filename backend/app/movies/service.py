@@ -16,6 +16,7 @@ from app.movies.models import (
     bridge_movie_genre,
 )
 from app.movies.schemas import (
+    CatalogStats,
     GenreRead,
     MovieDetail,
     MovieListItem,
@@ -24,6 +25,7 @@ from app.movies.schemas import (
     Page,
     RatingSummary,
     ReviewCreate,
+    ReviewFeedItem,
     ReviewRead,
 )
 
@@ -75,6 +77,20 @@ def _apply_sort(query: Select, sort: MovieSort) -> Select:
             return query.order_by(DimMovie.ano_lancamento.desc().nulls_last(), DimMovie.titulo)
         case MovieSort.MAIS_ANTIGOS:
             return query.order_by(DimMovie.ano_lancamento.asc().nulls_last(), DimMovie.titulo)
+        case MovieSort.NOTA:
+            ratings = (
+                select(
+                    MovieReview.sk_movie_id,
+                    func.avg(MovieReview.nota).label("media"),
+                    func.count().label("qtd"),
+                )
+                .group_by(MovieReview.sk_movie_id)
+                .subquery()
+            )
+            # Filmes sem avaliação ficam no fim (NULL é o menor valor no SQLite).
+            return query.outerjoin(ratings, ratings.c.sk_movie_id == DimMovie.sk_movie_id).order_by(
+                ratings.c.media.desc(), ratings.c.qtd.desc(), DimMovie.titulo
+            )
 
 
 async def list_movies(
@@ -83,6 +99,7 @@ async def list_movies(
     busca: str | None,
     genero: str | None,
     ano: int | None,
+    min_avaliacoes: int = 0,
     ordenar: MovieSort,
     page: int,
     page_size: int,
@@ -100,6 +117,14 @@ async def list_movies(
         )
     if ano is not None:
         filters.append(DimMovie.ano_lancamento == ano)
+    if min_avaliacoes > 0:
+        filters.append(
+            DimMovie.sk_movie_id.in_(
+                select(MovieReview.sk_movie_id)
+                .group_by(MovieReview.sk_movie_id)
+                .having(func.count() >= min_avaliacoes)
+            )
+        )
 
     total = await session.scalar(select(func.count()).select_from(DimMovie).where(*filters))
     assert total is not None
@@ -120,6 +145,7 @@ async def list_movies(
             titulo=movie.titulo,
             ano_lancamento=movie.ano_lancamento,
             url_poster=movie.url_poster,
+            url_backdrop=movie.url_backdrop,
             generos=[genre.nome_genero for genre in movie.genres],
             **ratings.get(movie.sk_movie_id, RatingSummary()).model_dump(),
         )
@@ -131,6 +157,44 @@ async def list_movies(
         page=page,
         page_size=page_size,
         pages=math.ceil(total / page_size),
+    )
+
+
+async def catalog_stats(session: AsyncSession) -> CatalogStats:
+    total_filmes = await session.scalar(select(func.count()).select_from(DimMovie))
+    total_avaliacoes, media = (
+        await session.execute(select(func.count(), func.avg(MovieReview.nota)))
+    ).one()
+    return CatalogStats(
+        total_filmes=total_filmes or 0,
+        total_avaliacoes=total_avaliacoes,
+        nota_media_geral=round(media, 2) if media is not None else None,
+    )
+
+
+async def list_reviews(session: AsyncSession, *, page: int, page_size: int) -> Page[ReviewFeedItem]:
+    """Avaliações de todos os filmes, das mais recentes para as mais antigas."""
+
+    total = await session.scalar(select(func.count()).select_from(MovieReview))
+    assert total is not None
+    rows = await session.execute(
+        select(MovieReview, DimMovie.titulo, DimMovie.url_poster)
+        .join(DimMovie)
+        .order_by(MovieReview.created_at.desc(), MovieReview.sk_movie_review_id)
+        .limit(page_size)
+        .offset((page - 1) * page_size)
+    )
+    items = [
+        ReviewFeedItem(
+            **ReviewRead.model_validate(review).model_dump(),
+            sk_movie_id=review.sk_movie_id,
+            titulo_filme=titulo,
+            url_poster=url_poster,
+        )
+        for review, titulo, url_poster in rows
+    ]
+    return Page(
+        items=items, total=total, page=page, page_size=page_size, pages=math.ceil(total / page_size)
     )
 
 

@@ -12,6 +12,7 @@ class MovieSort(StrEnum):
     TITULO = "titulo"
     MAIS_RECENTES = "mais_recentes"
     MAIS_ANTIGOS = "mais_antigos"
+    NOTA = "nota"
 
 
 class RatingSummary(BaseModel):
@@ -26,6 +27,7 @@ class MovieListItem(RatingSummary):
     titulo: str
     ano_lancamento: int | None
     url_poster: str | None
+    url_backdrop: str | None
     generos: list[str]
 
 
@@ -70,6 +72,20 @@ class ReviewCreate(BaseModel):
         if not value:
             raise ValueError("o campo não pode ficar em branco")
         return value
+
+
+class ReviewFeedItem(ReviewRead):
+    """Avaliação acompanhada do filme a que pertence (feed geral)."""
+
+    sk_movie_id: str
+    titulo_filme: str
+    url_poster: str | None
+
+
+class CatalogStats(BaseModel):
+    total_filmes: int
+    total_avaliacoes: int
+    nota_media_geral: float | None
 
 
 class MovieDetail(RatingSummary):

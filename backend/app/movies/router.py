@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.movies import service
 from app.movies.schemas import (
+    CatalogStats,
     GenreRead,
     MovieDetail,
     MovieListItem,
@@ -13,11 +14,14 @@ from app.movies.schemas import (
     MovieWrite,
     Page,
     ReviewCreate,
+    ReviewFeedItem,
     ReviewRead,
 )
 
 router = APIRouter()
 genres_router = APIRouter()
+reviews_router = APIRouter()
+stats_router = APIRouter()
 
 Session = Annotated[AsyncSession, Depends(get_db)]
 
@@ -41,6 +45,9 @@ async def list_movies(
     busca: Annotated[str | None, Query(max_length=200, description="Trecho do título")] = None,
     genero: Annotated[str | None, Query(description="Nome do gênero")] = None,
     ano: Annotated[int | None, Query(description="Ano de lançamento")] = None,
+    min_avaliacoes: Annotated[
+        int, Query(ge=0, description="Só filmes com pelo menos N avaliações")
+    ] = 0,
     ordenar: MovieSort = MovieSort.POPULARIDADE,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -50,6 +57,7 @@ async def list_movies(
         busca=busca,
         genero=genero,
         ano=ano,
+        min_avaliacoes=min_avaliacoes,
         ordenar=ordenar,
         page=page,
         page_size=page_size,
@@ -96,3 +104,17 @@ async def add_review(movie_id: str, data: ReviewCreate, session: Session) -> Rev
     if review is None:
         raise _not_found()
     return review
+
+
+@reviews_router.get("", response_model=Page[ReviewFeedItem])
+async def list_reviews(
+    session: Session,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> Page[ReviewFeedItem]:
+    return await service.list_reviews(session, page=page, page_size=page_size)
+
+
+@stats_router.get("", response_model=CatalogStats)
+async def catalog_stats(session: Session) -> CatalogStats:
+    return await service.catalog_stats(session)
