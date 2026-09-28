@@ -23,6 +23,7 @@ from app.movies.schemas import (
     MovieWrite,
     Page,
     RatingSummary,
+    ReviewCreate,
     ReviewRead,
 )
 
@@ -265,6 +266,17 @@ async def update_movie(
     await session.commit()
 
     return await get_movie(session, movie_id)
+
+
+async def add_review(session: AsyncSession, movie_id: str, data: ReviewCreate) -> ReviewRead | None:
+    if await session.get(DimMovie, movie_id) is None:
+        return None
+
+    review = MovieReview(sk_movie_id=movie_id, **data.model_dump())
+    session.add(review)
+    await session.commit()
+    await session.refresh(review)  # carrega o created_at gerado pelo banco
+    return ReviewRead.model_validate(review)
 
 
 async def delete_movie(session: AsyncSession, movie_id: str) -> bool:

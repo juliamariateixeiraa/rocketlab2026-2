@@ -140,3 +140,47 @@ async def test_unknown_movie_returns_404(client: httpx.AsyncClient) -> None:
 async def test_list_genres(client: httpx.AsyncClient) -> None:
     genres = (await client.get("/genres")).json()
     assert [g["nome_genero"] for g in genres] == ["Action", "Comedy", "Drama", "Horror"]
+
+
+async def test_add_review_updates_average(client: httpx.AsyncClient) -> None:
+    movie = await create_movie(client)
+    url = f"/movies/{movie['sk_movie_id']}/reviews"
+
+    response = await client.post(url, json={"nome": " Ana ", "nota": 10, "comentario": "Ótimo"})
+    assert response.status_code == 201
+    review = response.json()
+    assert review["nome"] == "Ana"
+    assert review["created_at"]
+
+    await client.post(url, json={"nome": "Bia", "nota": 7, "comentario": "Bom"})
+
+    detail = (await client.get(f"/movies/{movie['sk_movie_id']}")).json()
+    assert detail["nota_media"] == 8.5
+    assert detail["qtd_avaliacoes"] == 2
+    assert {r["nome"] for r in detail["avaliacoes"]} == {"Ana", "Bia"}
+
+
+async def test_add_review_validates_input(client: httpx.AsyncClient) -> None:
+    movie = await create_movie(client)
+    url = f"/movies/{movie['sk_movie_id']}/reviews"
+
+    for invalid in (
+        {"nome": "Ana", "nota": 11, "comentario": "x"},
+        {"nome": "Ana", "nota": -1, "comentario": "x"},
+        {"nome": "  ", "nota": 5, "comentario": "x"},
+        {"nome": "Ana", "nota": 5, "comentario": ""},
+    ):
+        assert (await client.post(url, json=invalid)).status_code == 422, invalid
+
+    response = await client.post(
+        "/movies/nao-existe/reviews", json={"nome": "Ana", "nota": 5, "comentario": "x"}
+    )
+    assert response.status_code == 404
+
+
+async def test_review_timestamp_is_sent_as_utc(client: httpx.AsyncClient) -> None:
+    movie = await create_movie(client)
+    response = await client.post(
+        f"/movies/{movie['sk_movie_id']}/reviews", json={"nome": "A", "nota": 5, "comentario": "c"}
+    )
+    assert response.json()["created_at"].endswith("Z")

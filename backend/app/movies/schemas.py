@@ -1,10 +1,10 @@
 """Schemas Pydantic de entrada e saída da API de filmes."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 
 class MovieSort(StrEnum):
@@ -48,6 +48,28 @@ class ReviewRead(BaseModel):
     nota: float
     comentario: str
     created_at: datetime
+
+    @field_serializer("created_at")
+    def as_utc(self, value: datetime) -> datetime:
+        """O SQLite grava ``CURRENT_TIMESTAMP`` em UTC, porém sem fuso."""
+
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+class ReviewCreate(BaseModel):
+    """Nova avaliação na escala do banco (0–10); o front converte 1–5 estrelas."""
+
+    nome: str = Field(min_length=1, max_length=120)
+    nota: float = Field(ge=0, le=10)
+    comentario: str = Field(min_length=1, max_length=4000)
+
+    @field_validator("nome", "comentario")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("o campo não pode ficar em branco")
+        return value
 
 
 class MovieDetail(RatingSummary):

@@ -5,7 +5,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.movies import service
-from app.movies.schemas import GenreRead, MovieDetail, MovieListItem, MovieSort, MovieWrite, Page
+from app.movies.schemas import (
+    GenreRead,
+    MovieDetail,
+    MovieListItem,
+    MovieSort,
+    MovieWrite,
+    Page,
+    ReviewCreate,
+    ReviewRead,
+)
 
 router = APIRouter()
 genres_router = APIRouter()
@@ -79,3 +88,11 @@ async def delete_movie(movie_id: str, session: Session) -> Response:
     if not await service.delete_movie(session, movie_id):
         raise _not_found()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{movie_id}/reviews", response_model=ReviewRead, status_code=status.HTTP_201_CREATED)
+async def add_review(movie_id: str, data: ReviewCreate, session: Session) -> ReviewRead:
+    review = await service.add_review(session, movie_id, data)
+    if review is None:
+        raise _not_found()
+    return review
